@@ -1,0 +1,132 @@
+### =====================================================
+### TALLER 7 - SOLICITUDES AVANZADAS (IntelliJ HTTP Client)
+### Ejecutar en orden. Los IDs se guardan solos entre pruebas.
+### =====================================================
+
+### 0.a PREPARACIÓN - Crear cliente (guarda {{clienteId}})
+POST http://localhost:8080/api/clientes
+Content-Type: application/json
+
+{
+  "nombre": "Ana Torres",
+  "email": "ana-{{$uuid}}@hotel.com"
+}
+
+> {%
+    client.global.set("clienteId", response.body.id);
+%}
+
+### 0.b PREPARACIÓN - Crear habitación estándar (guarda {{estandarId}})
+POST http://localhost:8080/api/habitaciones/estandar
+Content-Type: application/json
+
+{
+  "numero": "E-{{$random.integer(1000, 9999)}}",
+  "precioPorNoche": 100.0,
+  "capacidadMaxima": 2,
+  "camasIndividuales": 2
+}
+
+> {%
+    client.global.set("estandarId", response.body.id);
+%}
+
+### =====================================================
+### 1. CREACIÓN DE SUITE PRESIDENCIAL  -> 201 Created
+### (Si la repites devuelve 409: el número P05-501 es único)
+### =====================================================
+POST http://localhost:8080/api/habitaciones/suites
+Content-Type: application/json
+
+{
+  "numero": "P05-{{$random.integer(100, 999)}}",
+  "precioPorNoche": 350.0,
+  "capacidadMaxima": 2,
+  "jacuzziPrivado": true,
+  "incluyeMayordomo": true
+}
+
+> {%
+    client.test("Suite creada con 201", function () {
+        client.assert(response.status === 201, "Se esperaba 201");
+        client.assert(response.body.tipo === "SUITE", "tipo debe ser SUITE");
+    });
+    client.global.set("suiteId", response.body.id);
+%}
+
+### 1.b PREPARACIÓN - Reservar la suite y la estándar para el cliente
+POST http://localhost:8080/api/reservas
+Content-Type: application/json
+
+{
+  "clienteId": "{{clienteId}}",
+  "habitacionId": "{{suiteId}}",
+  "fechaInicio": "2026-11-01T14:00:00",
+  "fechaFin": "2026-11-04T12:00:00"
+}
+
+###
+POST http://localhost:8080/api/reservas
+Content-Type: application/json
+
+{
+  "clienteId": "{{clienteId}}",
+  "habitacionId": "{{estandarId}}",
+  "fechaInicio": "2026-12-10T14:00:00",
+  "fechaFin": "2026-12-12T12:00:00"
+}
+
+### =====================================================
+### 2. CONSULTA POLIMÓRFICA  -> 200 OK
+### Conviven ESTANDAR (camasIndividuales) y SUITE (jacuzziPrivado, incluyeMayordomo)
+### =====================================================
+GET http://localhost:8080/api/habitaciones
+Accept: application/json
+
+> {%
+    client.test("Lista polimórfica", function () {
+        client.assert(response.status === 200, "Se esperaba 200");
+        client.assert(response.body.some(h => h.tipo === "ESTANDAR"), "Falta ESTANDAR");
+        client.assert(response.body.some(h => h.tipo === "SUITE"), "Falta SUITE");
+    });
+%}
+
+### =====================================================
+### 3. RESUMEN EJECUTIVO DEL CLIENTE  -> 200 OK
+### Total gastado, cantidad de reservas y lista embebida sin ciclos
+### =====================================================
+GET http://localhost:8080/api/clientes/{{clienteId}}/resumen
+Accept: application/json
+
+> {%
+    client.test("Resumen calculado", function () {
+        client.assert(response.status === 200, "Se esperaba 200");
+        client.assert(response.body.totalReservasRealizadas === 2, "Debe tener 2 reservas");
+        client.assert(response.body.montoTotalGastado > 0, "Monto debe ser > 0");
+    });
+%}
+
+### =====================================================
+### 4. ACTUALIZACIÓN SELECTIVA (PATCH)  -> 200 OK
+### Solo cambia el nombre; email, activo y penalizaciones quedan intactos
+### =====================================================
+PATCH http://localhost:8080/api/clientes/{{clienteId}}
+Content-Type: application/json
+
+{
+  "nombre": "Nuevo Nombre Modificado"
+}
+
+> {%
+    client.test("PATCH parcial", function () {
+        client.assert(response.status === 200, "Se esperaba 200");
+        client.assert(response.body.nombre === "Nuevo Nombre Modificado", "Nombre no cambió");
+        client.assert(response.body.email.startsWith("ana-"), "El email no debe cambiar");
+        client.assert(response.body.activo === true, "activo no debe cambiar");
+        client.assert(response.body.penalizaciones === 0, "penalizaciones no deben cambiar");
+    });
+%}
+
+### 4.b Verificación en BD: el email sigue igual
+GET http://localhost:8080/api/clientes/{{clienteId}}
+Accept: application/json
